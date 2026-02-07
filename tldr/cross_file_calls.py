@@ -3409,6 +3409,9 @@ def _build_typescript_call_graph(
     workspace_config: Optional[WorkspaceConfig] = None
 ):
     """Build call graph for TypeScript files."""
+    # Load tsconfig path aliases once for the entire project
+    path_aliases = _load_tsconfig_paths(root)
+    
     for ts_file in scan_project(root, "typescript", workspace_config):
         ts_path = Path(ts_file)
         rel_path = str(ts_path.relative_to(root))
@@ -3424,12 +3427,13 @@ def _build_typescript_call_graph(
 
         for imp in imports:
             module = imp['module']
-            # Resolve relative imports
+            # Resolve relative imports and path aliases
             if module.startswith('.'):
                 # Convert relative path to file path
-                module_path = _resolve_ts_import(rel_path, module)
+                module_path = _resolve_ts_import(rel_path, module, path_aliases)
             else:
-                module_path = module
+                # Try path alias resolution for non-relative imports
+                module_path = _resolve_ts_import(rel_path, module, path_aliases)
 
             # Named imports: import { foo, bar as baz } from "./module"
             for name in imp.get('names', []):
@@ -3485,8 +3489,106 @@ def _build_typescript_call_graph(
                                 graph.add_edge(rel_path, caller_func, dst_file, method)
 
 
-def _resolve_ts_import(from_file: str, import_path: str) -> str:
-    """Resolve a relative TypeScript import path to a file path."""
+def _load_tsconfig_paths(root: Path) -> dict[str, str]:
+    """Load TypeScript path aliases from tsconfig.json.
+    
+    Parses compilerOptions.paths and compilerOptions.baseUrl to resolve
+    path aliases like @/* -> src/*.
+    
+    Args:
+        root: Project root directory
+        
+    Returns:
+        Dict mapping alias prefixes to resolved prefixes
+        Example: {"@/": "frontend/src/", "~/": "lib/"}
+    """
+    import json
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    path_aliases = {}
+    
+    try:
+        # Look for tsconfig.json in root and subdirectories
+        tsconfig_files = []
+        for tsconfig_path in root.rglob("tsconfig.json"):
+            # Skip node_modules
+            if "node_modules" in tsconfig_path.parts:
+                continue
+            tsconfig_files.append(tsconfig_path)
+        
+        for tsconfig_path in tsconfig_files:
+            try:
+                with open(tsconfig_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                if not isinstance(config, dict):
+                    continue
+                
+                compiler_opts = config.get('compilerOptions', {})
+                base_url = compiler_opts.get('baseUrl', '.')
+                paths = compiler_opts.get('paths', {})
+                
+                if not paths:
+                    continue
+                
+                # Convert relative baseUrl to absolute, then back to project-relative
+                config_dir = tsconfig_path.parent
+                if base_url == '.':
+                    base_path = config_dir
+                else:
+                    base_path = config_dir / base_url
+                
+                # Make base_path relative to project root
+                try:
+                    base_relative = base_path.relative_to(root)
+                except ValueError:
+                    # base_path is outside project root, skip
+                    continue
+                
+                # Parse path mappings
+                for alias_pattern, target_patterns in paths.items():
+                    if not isinstance(target_patterns, list) or not target_patterns:
+                        continue
+                    
+                    # Take first target pattern (handles most cases)
+                    target_pattern = target_patterns[0]
+                    
+                    # Handle wildcard patterns: "@/*" -> "./src/*"
+                    if alias_pattern.endswith('/*') and target_pattern.endswith('/*'):
+                        alias_prefix = alias_pattern[:-1]  # "@/"
+                        target_prefix = target_pattern[:-1]  # "./src/"
+                        
+                        # Resolve target_prefix relative to base_path
+                        if target_prefix.startswith('./'):
+                            target_prefix = target_prefix[2:]
+                        
+                        # Combine with base_relative
+                        if str(base_relative) == '.':
+                            resolved = target_prefix
+                        else:
+                            resolved = f"{base_relative}/{target_prefix}"
+                        
+                        path_aliases[alias_prefix] = resolved
+                        logger.debug(f"Loaded path alias: {alias_prefix} -> {resolved} from {tsconfig_path}")
+                
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Failed to parse {tsconfig_path}: {e}")
+                continue
+        
+        if path_aliases:
+            logger.info(f"Loaded {len(path_aliases)} TypeScript path aliases")
+        
+    except Exception as e:
+        logger.warning(f"Error loading tsconfig.json paths: {e}")
+    
+    return path_aliases
+
+
+def _resolve_ts_import(from_file: str, import_path: str, path_aliases: dict | None = None) -> str:
+    """Resolve a relative TypeScript import path to a file path.
+    
+    Handles relative imports (./module, ../module) and path aliases (@/*, ~/*, etc.)."""
     from_dir = str(Path(from_file).parent)
     if from_dir == '.':
         from_dir = ''
@@ -3505,7 +3607,14 @@ def _resolve_ts_import(from_file: str, import_path: str) -> str:
                 parts.pop()
         resolved = '/'.join(parts + import_parts)
     else:
+        # Try to resolve path aliases (e.g., @/components/Foo -> src/components/Foo)
         resolved = import_path
+        if path_aliases:
+            for alias_prefix, resolved_prefix in path_aliases.items():
+                if import_path.startswith(alias_prefix):
+                    # Replace alias prefix with resolved prefix
+                    resolved = resolved_prefix + import_path[len(alias_prefix):]
+                    break
 
     return resolved
 
