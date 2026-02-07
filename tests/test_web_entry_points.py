@@ -605,6 +605,34 @@ function main() {
         assert "Button" not in dead_names, f"Components imported via @/ should not be dead. Dead: {dead_names}"
 
 
+class TestTSXFileParsing:
+    """Test that .tsx files with JSX are parsed correctly."""
+
+    def test_tsx_file_with_jsx_indexed_correctly(self, tmp_path: Path):
+        """Functions in .tsx files with JSX should be indexed."""
+        from tldr.cross_file_calls import build_function_index
+
+        # Create .tsx file with JSX syntax
+        (tmp_path / "Component.tsx").write_text("""
+export function MyComponent() {
+    return <div>Hello</div>;
+}
+
+export function AnotherComponent() {
+    return <span>World</span>;
+}
+""")
+
+        func_index = build_function_index(str(tmp_path), "typescript")
+
+        # Both functions should be indexed
+        key1 = ('Component', 'MyComponent')
+        key2 = ('Component', 'AnotherComponent')
+        
+        assert key1 in func_index, f"MyComponent should be in index. Keys: {[k for k in func_index.keys() if 'Component' in str(k)]}"
+        assert key2 in func_index, "AnotherComponent should be in index"
+
+
 class TestBackwardCompatibility:
     """Test that existing behavior is preserved."""
 

@@ -155,11 +155,17 @@ class ProjectCallGraph:
 
 
 def _get_ts_parser():
-    """Get or create a tree-sitter TypeScript parser."""
+    """Get or create a tree-sitter TypeScript/TSX parser.
+    
+    Uses language_tsx() which is a superset of TypeScript and handles both
+    .ts and .tsx files correctly. This prevents parse errors in .tsx files
+    that contain JSX syntax.
+    """
     if not TREE_SITTER_AVAILABLE:
         raise RuntimeError("tree-sitter-typescript not available")
 
-    ts_lang = tree_sitter.Language(tree_sitter_typescript.language_typescript())
+    # Use TSX parser for all TypeScript files - it's a superset that handles both .ts and .tsx
+    ts_lang = tree_sitter.Language(tree_sitter_typescript.language_tsx())
     parser = tree_sitter.Parser(ts_lang)
     return parser
 
