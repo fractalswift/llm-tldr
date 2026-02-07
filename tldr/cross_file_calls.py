@@ -2620,6 +2620,19 @@ def _extract_ts_file_calls(file_path: Path, root: Path) -> dict[str, list[tuple[
                         elif obj_name and method_name:
                             calls.append(('attr', f"{obj_name}.{method_name}"))
                         break
+            
+            # JSX component usage: <MyButton /> is a "call" to MyButton
+            elif node.type in ("jsx_opening_element", "jsx_self_closing_element"):
+                for child in node.children:
+                    if child.type == "identifier":
+                        component_name = source[child.start_byte:child.end_byte].decode("utf-8")
+                        # Only treat PascalCase as React components (lowercase = HTML elements)
+                        if component_name and component_name[0].isupper():
+                            if component_name in defined_names:
+                                calls.append(('intra', component_name))
+                            else:
+                                calls.append(('direct', component_name))
+                        break
 
             for child in node.children:
                 visit_calls(child)

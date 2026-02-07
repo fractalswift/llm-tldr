@@ -562,6 +562,11 @@ class HybridExtractor:
                 callee = self._get_ts_call_name(child, source)
                 if callee and callee in defined_names:
                     call_graph.add_call(caller_name, callee)
+            # JSX component usage: <MyButton /> is a "call" to MyButton
+            elif child.type in ("jsx_opening_element", "jsx_self_closing_element"):
+                callee = self._get_jsx_component_name(child, source)
+                if callee and callee in defined_names:
+                    call_graph.add_call(caller_name, callee)
             # Recurse into all children
             self._extract_ts_calls(child, caller_name, source, call_graph, defined_names)
 
@@ -617,6 +622,20 @@ class HybridExtractor:
                         return self._safe_decode(source[c.start_byte:c.end_byte])
         return None
 
+    def _get_jsx_component_name(self, node, source: bytes) -> str | None:
+        """Extract component name from JSX element.
+        
+        Returns component name if PascalCase (React component), None otherwise.
+        Filters out lowercase HTML elements like <div>, <span>, etc.
+        """
+        for child in node.children:
+            if child.type == "identifier":
+                name = self._safe_decode(source[child.start_byte:child.end_byte])
+                # Only return if PascalCase (React component convention)
+                if name and name[0].isupper():
+                    return name
+        return None
+    
     def _parse_jsdoc(self, comment: str) -> str:
         """Parse JSDoc comment into clean docstring."""
         # Remove /** and */ and leading asterisks
