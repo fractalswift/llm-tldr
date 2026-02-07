@@ -184,6 +184,7 @@ def dead_code_analysis(
     call_graph: "ProjectCallGraph",
     all_functions: list[dict],
     entry_points: list[str] | None = None,
+    project_root: Path | None = None,
 ) -> dict:
     """Find functions that are never called (excluding entry points).
 
@@ -191,10 +192,14 @@ def dead_code_analysis(
         call_graph: ProjectCallGraph from cross_file_calls
         all_functions: List of {file, name} dicts from structure analysis
         entry_points: Additional entry point patterns to exclude
+        project_root: Project root path for config file detection
 
     Returns:
         Dict with dead_functions, by_file, totals, and percentage
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     edges = call_graph.edges
     entry_points = entry_points or []
 
@@ -210,6 +215,7 @@ def dead_code_analysis(
 
     # Common entry point patterns
     entry_patterns = [
+        # Traditional CLI/script entry points
         "main",
         "__main__",
         "cli",
@@ -220,7 +226,26 @@ def dead_code_analysis(
         "pytest_",
         "setup",
         "teardown",
+        # Serverless/Lambda patterns
+        "handler",
+        "lambda_handler",
+        # Next.js data fetching (safe - unique enough to avoid false negatives)
+        "getServerSideProps",
+        "getStaticProps",
+        "getStaticPaths",
+        "getInitialProps",
     ] + entry_points
+    
+    # Load entry points from config files (serverless.yml, etc.)
+    if project_root:
+        try:
+            from tldr.project_config import load_project_entry_points
+            config_patterns = load_project_entry_points(Path(project_root))
+            if config_patterns:
+                entry_patterns.extend(config_patterns)
+                logger.debug(f"Loaded {len(config_patterns)} entry points from config files")
+        except Exception as e:
+            logger.warning(f"Failed to load project config entry points: {e}")
 
     # Find dead functions
     dead = []
@@ -414,7 +439,7 @@ def analyze_dead_code(
         for func_name in file_info.get("functions", []):
             all_functions.append({"file": file_path, "name": func_name})
 
-    return dead_code_analysis(call_graph, all_functions, entry_points)
+    return dead_code_analysis(call_graph, all_functions, entry_points, project_root=Path(path))
 
 
 def analyze_architecture(path: str, language: str = "python") -> dict:
