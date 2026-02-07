@@ -306,19 +306,9 @@ def extract_units_from_project(project_path: str, lang: str = "python", respect_
     project = Path(project_path).resolve()
     units = []
 
-    # Load ignore spec before getting structure
-    ignore_spec = load_ignore_patterns(project) if respect_ignore else None
-
     # Get code structure (L1) - use high limit for semantic index
-    structure = get_code_structure(str(project), language=lang, max_results=100000, ignore_spec=ignore_spec)
-
-    # Filter ignored files
-    if respect_ignore:
-        spec = load_ignore_patterns(project)
-        structure["files"] = [
-            f for f in structure.get("files", [])
-            if not should_ignore(project / f.get("path", ""), project, spec)
-        ]
+    # Let get_code_structure auto-create IgnoreSpec with both .tldrignore and .gitignore
+    structure = get_code_structure(str(project), language=lang, max_results=100000, respect_ignore=respect_ignore)
 
     # Build call graph (L2)
     try:
