@@ -3,9 +3,11 @@
 Tests:
 - Serverless Framework config parsing
 - JSX component call tracking
+- TanStack Router framework detection
 - Integration with dead code analysis
 """
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -316,6 +318,134 @@ export function main() {
         # main is an entry point, App is called by main, so these should also not be dead
         assert "main" not in dead_names
         assert "App" not in dead_names
+
+
+class TestTanStackRouter:
+    """Test TanStack Router framework detection."""
+
+    def test_detect_tanstack_from_package_json(self, tmp_path: Path):
+        """Detect TanStack Router from package.json dependencies."""
+        from tldr.project_config import parse_package_json_frameworks
+
+        # Create package.json with TanStack Router
+        package_json = {
+            "name": "test-app",
+            "dependencies": {
+                "react": "^18.0.0",
+                "@tanstack/react-router": "^1.114.3"
+            }
+        }
+        (tmp_path / "package.json").write_text(json.dumps(package_json))
+
+        patterns = parse_package_json_frameworks(tmp_path)
+
+        assert "routes/" in patterns, "Should detect TanStack Router and add routes/ pattern"
+
+    def test_detect_tanstack_from_devdependencies(self, tmp_path: Path):
+        """Detect TanStack Router plugin from devDependencies."""
+        from tldr.project_config import parse_package_json_frameworks
+
+        package_json = {
+            "name": "test-app",
+            "devDependencies": {
+                "@tanstack/router-plugin": "^1.114.3",
+                "vite": "^5.0.0"
+            }
+        }
+        (tmp_path / "package.json").write_text(json.dumps(package_json))
+
+        patterns = parse_package_json_frameworks(tmp_path)
+
+        assert "routes/" in patterns
+
+    def test_no_routes_pattern_without_tanstack(self, tmp_path: Path):
+        """Do not add routes/ pattern if TanStack Router not present."""
+        from tldr.project_config import parse_package_json_frameworks
+
+        package_json = {
+            "name": "test-app",
+            "dependencies": {
+                "react": "^18.0.0",
+                "express": "^4.0.0"
+            }
+        }
+        (tmp_path / "package.json").write_text(json.dumps(package_json))
+
+        patterns = parse_package_json_frameworks(tmp_path)
+
+        assert "routes/" not in patterns, "Should not add routes/ for non-TanStack projects"
+
+    def test_finds_package_json_in_subdirectory(self, tmp_path: Path):
+        """Find and parse package.json in subdirectories like frontend/."""
+        from tldr.project_config import parse_package_json_frameworks
+
+        # Create frontend/package.json (typical monorepo structure)
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        
+        package_json = {
+            "name": "frontend",
+            "dependencies": {
+                "@tanstack/react-router": "^1.114.3"
+            }
+        }
+        (frontend_dir / "package.json").write_text(json.dumps(package_json))
+
+        patterns = parse_package_json_frameworks(tmp_path)
+
+        assert "routes/" in patterns, "Should find package.json in subdirectory"
+
+    def test_route_file_functions_not_marked_dead(self, tmp_path: Path):
+        """Functions in route files should not be marked as dead when TanStack Router detected."""
+        from tldr.api import build_project_call_graph, get_code_structure
+        from tldr.analysis import dead_code_analysis
+
+        # Create package.json with TanStack Router
+        package_json = {
+            "dependencies": {
+                "@tanstack/react-router": "^1.114.3"
+            }
+        }
+        (tmp_path / "package.json").write_text(json.dumps(package_json))
+
+        # Create a route file
+        routes_dir = tmp_path / "routes"
+        routes_dir.mkdir()
+        
+        route_file = routes_dir / "dashboard.tsx"
+        route_file.write_text("""
+export const Route = createFileRoute('/dashboard')({
+    component: DashboardPage,
+});
+
+function DashboardPage() {
+    return <div>Dashboard</div>;
+}
+""")
+
+        call_graph = build_project_call_graph(str(tmp_path), language="typescript")
+        structure = get_code_structure(str(tmp_path), language="typescript")
+
+        all_functions = []
+        for file_info in structure.get("files", []):
+            file_path = file_info.get("path", "")
+            for func_name in file_info.get("functions", []):
+                all_functions.append({"file": file_path, "name": func_name})
+
+        result = dead_code_analysis(call_graph, all_functions, project_root=tmp_path)
+
+        dead_names = [f["function"] for f in result["dead_functions"]]
+        
+        # DashboardPage should NOT be dead (in routes/ file, TanStack Router detected)
+        assert "DashboardPage" not in dead_names, f"Route file functions should not be dead. Dead: {dead_names}"
+
+    def test_missing_package_json_returns_empty(self, tmp_path: Path):
+        """Gracefully handle projects without package.json."""
+        from tldr.project_config import parse_package_json_frameworks
+
+        patterns = parse_package_json_frameworks(tmp_path)
+
+        assert patterns == [], "Should return empty list when no package.json found"
 
 
 class TestBackwardCompatibility:

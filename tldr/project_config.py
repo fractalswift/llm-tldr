@@ -3,10 +3,10 @@
 Extracts entry points from configuration files to improve dead code detection.
 Supports:
 - Serverless Framework (serverless.yml)
-- AWS SAM (template.yaml) - future
-- Next.js (package.json detection) - future
+- TanStack Router (package.json detection)
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import List
@@ -91,6 +91,65 @@ def parse_serverless_handlers(project_root: Path) -> List[str]:
         return []
 
 
+def parse_package_json_frameworks(project_root: Path) -> List[str]:
+    """Detect frameworks from package.json and return entry point patterns.
+    
+    Searches for package.json files in the project (excluding node_modules)
+    and detects file-based routing frameworks.
+    
+    Args:
+        project_root: Project root directory
+        
+    Returns:
+        List of entry point patterns (e.g., ["routes/"] for TanStack Router)
+        
+    Supports:
+        - TanStack Router: Detects @tanstack/react-router or @tanstack/router-plugin
+          Returns "routes/" to mark all route files as entry points
+    """
+    entry_patterns = []
+    
+    try:
+        # Find all package.json files (excluding node_modules, .serverless, etc.)
+        package_json_files = []
+        for pkg_file in project_root.rglob("package.json"):
+            # Skip if in excluded directories
+            parts = pkg_file.parts
+            if any(excl in parts for excl in ["node_modules", ".serverless", ".venv", "venv", "dist", "build"]):
+                continue
+            package_json_files.append(pkg_file)
+        
+        # Parse each package.json
+        for pkg_file in package_json_files:
+            try:
+                with open(pkg_file, 'r', encoding='utf-8') as f:
+                    pkg_data = json.load(f)
+                
+                if not isinstance(pkg_data, dict):
+                    continue
+                
+                # Combine dependencies and devDependencies
+                deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
+                
+                # Check for TanStack Router
+                if '@tanstack/react-router' in deps or '@tanstack/router-plugin' in deps:
+                    # Add routes/ as entry point pattern
+                    # This matches any file path containing "routes/"
+                    if "routes/" not in entry_patterns:
+                        entry_patterns.append("routes/")
+                        logger.info(f"Detected TanStack Router in {pkg_file.relative_to(project_root)}, adding routes/ as entry pattern")
+                
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Failed to parse {pkg_file}: {e}")
+                continue
+        
+        return entry_patterns
+        
+    except Exception as e:
+        logger.warning(f"Error scanning for package.json files: {e}")
+        return []
+
+
 def load_project_entry_points(project_root: Path) -> List[str]:
     """Load all entry points from project configuration files.
     
@@ -109,10 +168,12 @@ def load_project_entry_points(project_root: Path) -> List[str]:
     except Exception as e:
         logger.warning(f"Error loading serverless handlers: {e}")
     
-    # Future: Add more parsers here
-    # - parse_sam_template()
-    # - parse_nextjs_config()
-    # - parse_package_json()
+    # Parse package.json for framework detection
+    try:
+        framework_patterns = parse_package_json_frameworks(project_root)
+        entry_points.extend(framework_patterns)
+    except Exception as e:
+        logger.warning(f"Error loading framework patterns: {e}")
     
     if entry_points:
         logger.info(f"Loaded {len(entry_points)} entry points from config files")
