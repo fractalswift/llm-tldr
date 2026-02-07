@@ -1516,6 +1516,7 @@ def get_code_structure(
     language: str = "python",
     max_results: int = 100,
     ignore_spec=None,
+    *,
     respect_ignore: bool = True,
 ) -> dict:
     """
