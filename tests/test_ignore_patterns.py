@@ -135,33 +135,41 @@ class TestGetCodeStructureIgnorePatterns:
 
     def test_respects_gitignore_when_no_tldrignore(self, tmp_path: Path):
         """Should respect .gitignore patterns when .tldrignore is missing."""
+        import subprocess
         from tldr.api import get_code_structure
 
         # Setup: Create project with only .gitignore (no .tldrignore)
         project = tmp_path / "project"
         project.mkdir()
 
-        # Create .gitignore instead of .tldrignore
-        (project / ".gitignore").write_text("__pycache__/\n*.pyc\n")
+        # Initialize as git repo (required for gitignore checking)
+        subprocess.run(["git", "init"], cwd=project, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=project, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=project, capture_output=True, check=True)
+
+        # Create .gitignore with a directory pattern
+        (project / ".gitignore").write_text("build_output/\n")
 
         # Create files
         (project / "main.py").write_text("def main():\n    pass\n")
 
-        cache_dir = project / "__pycache__"
-        cache_dir.mkdir()
-        (cache_dir / "main.cpython-39.pyc").write_text("bytecode")
+        # Create a .py file in an ignored directory
+        # This tests that .gitignore actually filters, not just extension filtering
+        build_dir = project / "build_output"
+        build_dir.mkdir()
+        (build_dir / "generated.py").write_text("def generated():\n    pass\n")
 
         # Action: Call get_code_structure (should use gitignore)
         result = get_code_structure(str(project), language="python", max_results=100)
 
-        # Assert: __pycache__ files excluded
+        # Assert: build_output files excluded
         file_paths = [f["path"] for f in result.get("files", [])]
-        cache_files = [p for p in file_paths if "__pycache__" in p]
+        ignored_files = [p for p in file_paths if "build_output" in p]
 
-        assert len(cache_files) == 0, (
-            f"Expected no __pycache__ files, but found: {cache_files}"
+        assert len(ignored_files) == 0, (
+            f"Expected no build_output files, but found: {ignored_files}"
         )
-        assert len(file_paths) == 1, f"Expected 1 file, found {len(file_paths)}"
+        assert len(file_paths) == 1, f"Expected 1 file (main.py), found {len(file_paths)}"
 
 
 class TestAnalyzeDeadCodeIgnorePatterns:
