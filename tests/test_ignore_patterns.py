@@ -26,7 +26,7 @@ class TestGetCodeStructureIgnorePatterns:
         project.mkdir()
 
         # Create .tldrignore
-        (project / ".tldrignore").write_text("node_modules/\n.venv/\n")
+        (project / ".tldrignore").write_text("node_modules/\nvendor/\n")
 
         # Create source file
         src_dir = project / "src"
@@ -38,9 +38,11 @@ class TestGetCodeStructureIgnorePatterns:
         nm_dir.mkdir(parents=True)
         (nm_dir / "index.py").write_text("def ignored_func():\n    pass\n")
 
-        venv_dir = project / ".venv" / "lib"
-        venv_dir.mkdir(parents=True)
-        (venv_dir / "lib.py").write_text("def venv_func():\n    pass\n")
+        # Use vendor/ instead of .venv/ because get_code_structure filters hidden files
+        # This ensures we're actually testing .tldrignore, not just hidden-file filtering
+        vendor_dir = project / "vendor" / "lib"
+        vendor_dir.mkdir(parents=True)
+        (vendor_dir / "lib.py").write_text("def vendor_func():\n    pass\n")
 
         # Action: Call get_code_structure without ignore_spec
         result = get_code_structure(str(project), language="python", max_results=100)
@@ -48,13 +50,13 @@ class TestGetCodeStructureIgnorePatterns:
         # Assert: No ignored files included
         file_paths = [f["path"] for f in result.get("files", [])]
         node_modules_files = [p for p in file_paths if "node_modules" in p]
-        venv_files = [p for p in file_paths if ".venv" in p]
+        vendor_files = [p for p in file_paths if "vendor" in p]
 
         assert len(node_modules_files) == 0, (
             f"Expected no node_modules files, but found: {node_modules_files}"
         )
-        assert len(venv_files) == 0, (
-            f"Expected no .venv files, but found: {venv_files}"
+        assert len(vendor_files) == 0, (
+            f"Expected no vendor files, but found: {vendor_files}"
         )
         assert len(file_paths) == 1, f"Expected 1 file, found {len(file_paths)}: {file_paths}"
         assert "src/main.py" in file_paths[0] or "src\\main.py" in file_paths[0], (
