@@ -137,8 +137,16 @@ class TestGetCodeStructureIgnorePatterns:
 
     def test_respects_gitignore_when_no_tldrignore(self, tmp_path: Path):
         """Should respect .gitignore patterns when .tldrignore is missing."""
+        import shutil
         import subprocess
+
+        import pytest
+
         from tldr.api import get_code_structure
+
+        # Skip test if git is not installed
+        if not shutil.which("git"):
+            pytest.skip("git not installed")
 
         # Setup: Create project with only .gitignore (no .tldrignore)
         project = tmp_path / "project"
