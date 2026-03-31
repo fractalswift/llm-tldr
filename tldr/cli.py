@@ -376,9 +376,9 @@ Semantic Search:
     index_p.add_argument("path", nargs="?", default=".", help="Project root")
     index_p.add_argument(
         "--lang",
-        default="python",
+        default="all",
         choices=["python", "typescript", "javascript", "go", "rust", "java", "c", "cpp", "ruby", "php", "kotlin", "swift", "csharp", "scala", "lua", "luau", "elixir", "all"],
-        help="Language (use 'all' for multi-language)",
+        help="Language (default: auto-detect from project)",
     )
     index_p.add_argument(
         "--model",
